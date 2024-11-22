@@ -1,0 +1,1 @@
+In this folder all your YAML reports will be created.
