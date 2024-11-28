@@ -1,6 +1,7 @@
 import os
 import yaml
 import json
+import time
 import datetime
 import paramiko  
 
@@ -63,11 +64,16 @@ class MainApp:
                         }
                     else:
                         host = self.find_sudo(ssh, ip, login)
+
                     ssh.close()
 
-                    print(f"Login FOUND for {ip}, saving...")
-                    self.found_logins.append(host)
-                    found = True
+                    if host != None:
+                        print(f"Login FOUND for {ip}, saving...")
+                        self.found_logins.append(host)
+                        found = True
+                    else:
+                        print(f"Root password was NOT FOUND for {ip}")
+
                     break
 
                 except paramiko.ssh_exception.NoValidConnectionsError:
@@ -86,17 +92,26 @@ class MainApp:
                 print(f"Login NOT FOUND for {ip}")
 
     def find_sudo(self, ssh, ip, login):
+        stdin, stdout, stderr = ssh.exec_command(f"echo "" | sudo -S pwd")
+        if '/' in stdout.read().decode():
+            return {
+                'host': ip, 
+                'hostname': login['username'], 
+                'password': login['password'], 
+                'sudo_passwd': None
+            }
+
         for password in self.sudo_passwd_list:
-            stdin, stdout, stderr = ssh.exec_command(f"echo {password} | sudo -S ls")
-            if "incorrect password attempt" not in stderr.read().decode():
-                host = {
+            stdin, stdout, stderr = ssh.exec_command(f"echo {password} | su -c ls")
+            time.sleep(1)
+            if 'Authentication failure' not in stderr.read().decode():
+                return {
                     'host': ip, 
                     'hostname': login['username'], 
                     'password': login['password'], 
                     'sudo_passwd': password
-                    }
-                
-                return host
+                }
+        return None
 
     def write_data(self):
         date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -113,19 +128,31 @@ class MainApp:
         }
 
         for login in self.found_logins:
-            if login['hostname'] == 'root':
-                structure['all']['hosts'][login['host']] = {
-                    'ansible_user': login['hostname'],
-                    'ansible_password': login['password']
-                }
-            else:
-                structure['all']['hosts'][login['host']] = {
-                    'ansible_user': login['hostname'],
-                    'ansible_password': login['password'],
-                    'ansible_become': True,
-                    'ansible_become_method': 'sudo',
-                    'ansible_become_password': login['sudo_passwd']
-                }
+            try:
+                if login['hostname'] == 'root':
+                    structure['all']['hosts'][login['host']] = {
+                        'ansible_user': login['hostname'],
+                        'ansible_password': login['password']
+                    }
+                else:
+                    if login['sudo_passwd'] == None:
+                        structure['all']['hosts'][login['host']] = {
+                            'ansible_user': login['hostname'],
+                            'ansible_password': login['password'],
+                            'ansible_become': True,
+                            'ansible_become_method': 'sudo'
+                        }
+                    elif login['sudo_passwd'] != None:
+                        structure['all']['hosts'][login['host']] = {
+                            'ansible_user': login['hostname'],
+                            'ansible_password': login['password'],
+                            'ansible_become': True,
+                            'ansible_become_method': 'su',
+                            'ansible_become_password': login['sudo_passwd']
+                        }
+
+            except TypeError:
+                pass
 
         with open(path, "x") as file:
             yaml.dump(structure, file, default_flow_style=False, sort_keys=False)
