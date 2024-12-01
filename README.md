@@ -3,7 +3,8 @@ This simple tool allows you to provide a list of hosts, logins and sudo password
 
 Requiered dependencies:
 - python3
-with installed modules:
+  
+Used modules:
 - yaml
 - json
 - paramiko
