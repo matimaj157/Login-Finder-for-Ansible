@@ -1,7 +1,6 @@
 import os
 import yaml
 import json
-import time
 import datetime
 import paramiko  
 
@@ -92,26 +91,29 @@ class MainApp:
                 print(f"Login NOT FOUND for {ip}")
 
     def find_sudo(self, ssh, ip, login):
-        stdin, stdout, stderr = ssh.exec_command(f"echo "" | sudo -S pwd")
-        if '/' in stdout.read().decode():
-            return {
-                'host': ip, 
-                'hostname': login['username'], 
-                'password': login['password'], 
-                'sudo_passwd': None
-            }
+        _, stdout, stderr = ssh.exec_command(f"echo "" | sudo -S pwd")
+        host = {
+            'host': ip, 
+            'hostname': login['username'], 
+            'password': login['password'], 
+        }
+
+        if '/home' in stdout.read().decode():
+            host['sudo_passwd'] = None
+            return host
 
         for password in self.sudo_passwd_list:
-            stdin, stdout, stderr = ssh.exec_command(f"echo {password} | su -c ls")
-            time.sleep(1)
+            _, stdout, stderr = ssh.exec_command(f"echo {password} | su -c pwd")
             if 'Authentication failure' not in stderr.read().decode():
-                return {
-                    'host': ip, 
-                    'hostname': login['username'], 
-                    'password': login['password'], 
-                    'sudo_passwd': password
-                }
-        return None
+                host['sudo_passwd'] = password
+                host['method'] = 'su'
+                return host
+
+            _, stdout, stderr = ssh.exec_command(f"echo {password} | sudo -S pwd")
+            if '/home' in stdout.read().decode():
+                host['sudo_passwd'] = password
+                host['method'] = 'sudo'
+                return host
 
     def write_data(self):
         date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -129,33 +131,31 @@ class MainApp:
 
         for login in self.found_logins:
             try:
-                if login['hostname'] == 'root':
-                    structure['all']['hosts'][login['host']] = {
-                        'ansible_user': login['hostname'],
-                        'ansible_password': login['password']
-                    }
-                else:
+                structure['all']['hosts'][login['host']] = {
+                    'ansible_user': login['hostname'],
+                    'ansible_password': login['password']
+                }
+
+                if login['hostname'] != 'root':
+                    structure['all']['hosts'][login['host']]['ansible_become'] = True
+
                     if login['sudo_passwd'] == None:
-                        structure['all']['hosts'][login['host']] = {
-                            'ansible_user': login['hostname'],
-                            'ansible_password': login['password'],
-                            'ansible_become': True,
-                            'ansible_become_method': 'sudo'
-                        }
-                    elif login['sudo_passwd'] != None:
-                        structure['all']['hosts'][login['host']] = {
-                            'ansible_user': login['hostname'],
-                            'ansible_password': login['password'],
-                            'ansible_become': True,
-                            'ansible_become_method': 'su',
-                            'ansible_become_password': login['sudo_passwd']
-                        }
+                        structure['all']['hosts'][login['host']]['ansible_become_method'] = 'sudo'
+
+                    elif login['sudo_passwd'] != None and login['method'] == 'su':
+                        structure['all']['hosts'][login['host']]['ansible_become_method'] = 'su'
+                        structure['all']['hosts'][login['host']]['ansible_become_password'] = login['sudo_passwd']
+
+                    elif login['sudo_passwd'] != None and login['method'] == 'sudo':
+                        structure['all']['hosts'][login['host']]['ansible_become_method'] = 'sudo'
+                        structure['all']['hosts'][login['host']]['ansible_become_password'] = login['sudo_passwd']
 
             except TypeError:
                 pass
 
         with open(path, "x") as file:
             yaml.dump(structure, file, default_flow_style=False, sort_keys=False)
+            print("\nYAML file created successfully")
 
 if __name__ == "__main__":
     app = MainApp()
