@@ -91,13 +91,13 @@ class MainApp:
                 print(f"Login NOT FOUND for {ip}")
 
     def find_sudo(self, ssh, ip, login):
-        _, stdout, stderr = ssh.exec_command(f"echo "" | sudo -S pwd")
         host = {
             'host': ip, 
             'hostname': login['username'], 
             'password': login['password'], 
         }
 
+        _, stdout, stderr = ssh.exec_command(f"echo "" | sudo -S pwd")
         if '/home' in stdout.read().decode():
             host['sudo_passwd'] = None
             return host
@@ -120,7 +120,8 @@ class MainApp:
 
         path = os.path.dirname(os.path.abspath(__file__))
         path = os.path.join(path, 'reports')
-        path = os.path.join(path, f"{date}.yaml")
+        path_yaml = os.path.join(path, f"{date}.yaml")
+        path_csv = os.path.join(path, f"{date}.csv")
 
         structure = {
             'all': {
@@ -153,9 +154,21 @@ class MainApp:
             except TypeError:
                 pass
 
-        with open(path, "x") as file:
+        with open(path_yaml, "x") as file:
             yaml.dump(structure, file, default_flow_style=False, sort_keys=False)
-            print("\nYAML file created successfully")
+
+        with open(path_csv, "x") as file:
+            file.write("host,username,password,sudo_password,sudo_method\n")
+
+            for host, data in structure['all']['hosts'].items():
+                try:
+                    file.write(f"{host},{data['ansible_user']},{data['ansible_password']},{data['ansible_become_password']},{data['ansible_become_method']}\n")
+                except KeyError:
+                    if 'ansible_become_password' not in data.keys() and 'ansible_become_method' in data.keys():
+                        file.write(f"{host},{data['ansible_user']},{data['ansible_password']},-,sudo\n")
+                    else:
+                        file.write(f"{host},{data['ansible_user']},{data['ansible_password']},-,-\n")
+
 
 if __name__ == "__main__":
     app = MainApp()
